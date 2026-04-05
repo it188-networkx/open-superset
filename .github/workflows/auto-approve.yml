@@ -1,0 +1,238 @@
+name: Auto-approve maintainer PR
+
+# 自动批准工作流
+#
+# 场景 A — 人类 write/maintain 用户的 PR 标记 ready_for_review:
+#   不涉及 .github/ → maintain 自动批准；write 跳过，需人工审批
+#   涉及 .github/   → 跳过，需 admin 审批
+#
+# 场景 B — Copilot 等非 User 类型的 PR 标记 ready_for_review:
+#   回溯检查 PR 评论中是否已有 /approve（可能在 draft 阶段被跳过）
+#   有 /approve → 按场景 C 权限逻辑处理
+#   无 /approve → 跳过，等待人工审核后评论 /approve
+#
+# 场景 C — PR 上评论 /approve（仅 maintain/admin 角色生效）:
+#   若 PR 仍为 draft 且为 Copilot PR 且 copilot_work_finished → 自动转 ready_for_review
+#   不涉及 .github/ → 自动批准
+#   涉及 .github/   → 仅 admin 可批准；maintain 提示需要 admin 批准
+
+on:
+  pull_request:
+    types: [ready_for_review]
+  issue_comment:
+    types: [created]
+
+jobs:
+  auto-approve:
+    runs-on: ubuntu-latest
+    # 仅在 ready_for_review 或 PR 上的 /approve 评论时运行
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '/approve'))
+    steps:
+      - name: Check permission and approve
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_PAT }}
+          retries: 3
+          script: |
+            const { owner, repo } = context.repo;
+
+            // ── 解析 PR 基本信息 ───────────────────────
+            let prNumber, isDraft, prData;
+
+            if (context.eventName === 'pull_request') {
+              prData = context.payload.pull_request;
+              prNumber = prData.number;
+              isDraft = prData.draft;
+            } else {
+              prNumber = context.payload.issue.number;
+              const { data: pr } = await github.rest.pulls.get({
+                owner, repo, pull_number: prNumber,
+              });
+              prData = pr;
+              isDraft = pr.draft;
+            }
+
+            // ── /approve 权限前置校验（仅 maintain/admin 可触发后续操作） ──
+            let approveCommenter, approveRole;
+            if (context.eventName === 'issue_comment') {
+              approveCommenter = context.payload.comment.user.login;
+              const { data: commenterPerm } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner, repo, username: approveCommenter,
+              });
+              approveRole = commenterPerm.role_name;
+              if (approveRole !== 'maintain' && approveRole !== 'admin') {
+                console.log(`Skip: /approve by ${approveCommenter} (role=${approveRole}), requires maintain/admin`);
+                return;
+              }
+            }
+
+            // 0. Draft PR 不自动审批（场景 C 对 Copilot 已完成工作的 PR 例外）
+            if (isDraft) {
+              if (context.eventName !== 'issue_comment') {
+                console.log(`Skip: PR #${prNumber} is a draft`);
+                return;
+              }
+              // 场景 C: 检查是否为 Copilot PR 且已完成工作
+              if (prData.user.type === 'User') {
+                console.log(`Skip: PR #${prNumber} is a draft (human PR)`);
+                return;
+              }
+              // 查询 timeline 确认 copilot_work_finished
+              const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                owner, repo, issue_number: prNumber, per_page: 100,
+              });
+              const workFinished = timeline.some(e => e.event === 'copilot_work_finished');
+              if (!workFinished) {
+                console.log(`Skip: PR #${prNumber} is a draft (Copilot work not finished)`);
+                return;
+              }
+              // Copilot 已完成 → 自动转为 ready_for_review (GraphQL mutation)
+              await github.graphql(`
+                mutation($id: ID!) {
+                  markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+                    pullRequest { isDraft }
+                  }
+                }
+              `, { id: prData.node_id });
+              isDraft = false;
+              console.log(`Auto mark-ready: PR #${prNumber} (Copilot work finished, /approve present)`);
+            }
+
+            // 1. 检查是否涉及 .github/
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner, repo, pull_number: prNumber, per_page: 100,
+            });
+            const touchesGithub = files.some(f => f.filename.startsWith('.github/'));
+
+            // ── helper: 批准 → 清理 reviewers → 启用 auto-merge ──
+            async function approve(actor, role) {
+              await github.rest.pulls.createReview({
+                owner, repo, pull_number: prNumber, event: 'APPROVE',
+              });
+              console.log(`Approved PR #${prNumber} by ${actor} (role=${role})`);
+
+              // 清理 pending review requests
+              const { data: freshPr } = await github.rest.pulls.get({
+                owner, repo, pull_number: prNumber,
+              });
+              const pendingReviewers = (freshPr.requested_reviewers || []).map(r => r.login);
+              if (pendingReviewers.length > 0) {
+                await github.rest.pulls.removeRequestedReviewers({
+                  owner, repo, pull_number: prNumber, reviewers: pendingReviewers,
+                });
+                console.log(`Removed pending reviewers: ${pendingReviewers.join(', ')}`);
+              }
+
+              // 直接 squash-merge（admin 为 bypass actor 可绕过 review 要求）
+              // 背景：Copilot 在 commit 中自动添加 Co-authored-by: <assigner>，
+              //       导致 assigner 的 review 不被 ruleset 计入 required review count，
+              //       enablePullRequestAutoMerge 会永久等待无法满足的条件。
+              try {
+                await github.rest.pulls.merge({
+                  owner, repo, pull_number: prNumber, merge_method: 'squash',
+                });
+                console.log(`Direct squash-merged PR #${prNumber}`);
+              } catch (mergeErr) {
+                // 直接合并失败（如 checks 仍在运行），回退到 auto-merge
+                console.log(`Direct merge not ready: ${mergeErr.message}, falling back to auto-merge`);
+                try {
+                  await github.graphql(`
+                    mutation($prId: ID!) {
+                      enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: SQUASH }) {
+                        pullRequest { autoMergeRequest { enabledAt } }
+                      }
+                    }
+                  `, { prId: freshPr.node_id });
+                  console.log(`Auto-merge enabled for PR #${prNumber}`);
+                } catch (e) {
+                  if (e.message && e.message.includes('already')) {
+                    console.log(`Auto-merge already enabled for PR #${prNumber}`);
+                  } else {
+                    throw e;
+                  }
+                }
+              }
+            }
+
+            // ── 场景 A: ready_for_review 触发 ────────────
+            if (context.eventName === 'pull_request') {
+              const pr = context.payload.pull_request;
+
+              // 非 User 类型（Copilot / Bot）→ 回溯检查已有 /approve 评论
+              if (pr.user.type !== 'User') {
+                const comments = await github.paginate(github.rest.issues.listComments, {
+                  owner, repo, issue_number: prNumber, per_page: 100,
+                });
+                const approveComments = comments.filter(c =>
+                  c.body && c.body.includes('/approve') && c.user.type === 'User'
+                );
+
+                // 找到先前被 draft 跳过的 /approve（仅 maintain/admin 有效）
+                let priorUser = null;
+                let priorRole = null;
+                for (const c of approveComments) {
+                  const { data: p } = await github.rest.repos.getCollaboratorPermissionLevel({
+                    owner, repo, username: c.user.login,
+                  });
+                  if (p.role_name === 'maintain' || p.role_name === 'admin') {
+                    priorUser = c.user.login;
+                    priorRole = p.role_name;
+                    break;
+                  }
+                }
+                if (!priorUser) {
+                  console.log(`Skip: PR #${prNumber} author ${pr.user.login} (type=${pr.user.type}). No prior /approve from maintain/admin found.`);
+                  return;
+                }
+
+                if (touchesGithub) {
+                  if (priorRole === 'admin') {
+                    await approve(priorUser, priorRole);
+                  } else {
+                    console.log(`Skip: prior /approve by ${priorUser} (role=${priorRole}), .github/ requires admin`);
+                  }
+                } else {
+                  await approve(priorUser, priorRole);
+                }
+                return;
+              }
+
+              // 涉及 .github/ → 跳过，需 admin 审批
+              if (touchesGithub) {
+                console.log(`Skip: PR #${prNumber} touches .github/ — requires admin review`);
+                return;
+              }
+
+              // 校验 PR 作者角色
+              const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner, repo, username: pr.user.login,
+              });
+              if (perm.role_name === 'maintain' || perm.role_name === 'admin') {
+                await approve(pr.user.login, perm.role_name);
+              } else {
+                console.log(`Skip: ${pr.user.login} role='${perm.role_name}' (not maintain/admin)`);
+              }
+              return;
+            }
+
+            // ── 场景 C: /approve 评论触发（已通过前置权限校验，commenter 为 maintain/admin） ──
+            if (touchesGithub) {
+              // 涉及 .github/ → 仅 admin 可批准
+              if (approveRole === 'admin') {
+                await approve(approveCommenter, approveRole);
+              } else {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: prNumber,
+                  body: `\`/approve\` 未生效: PR 涉及 \`.github/\` 目录，需要 **admin** 角色批准。当前角色: ${approveRole}`,
+                });
+                console.log(`Reject: ${approveCommenter} role='${approveRole}', .github/ requires admin`);
+              }
+              return;
+            }
+
+            // 不涉及 .github/ → maintain/admin 直接批准
+            await approve(approveCommenter, approveRole);
