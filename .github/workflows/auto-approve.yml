@@ -133,7 +133,7 @@ jobs:
               //       enablePullRequestAutoMerge 会永久等待无法满足的条件。
               try {
                 await github.rest.pulls.merge({
-                  owner, repo, pull_number: prNumber, merge_method: 'squash',
+                  owner, repo, pull_number: prNumber, merge_method: 'merge',
                 });
                 console.log(`Direct squash-merged PR #${prNumber}`);
               } catch (mergeErr) {
@@ -142,7 +142,7 @@ jobs:
                 try {
                   await github.graphql(`
                     mutation($prId: ID!) {
-                      enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: SQUASH }) {
+                      enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: MERGE }) {
                         pullRequest { autoMergeRequest { enabledAt } }
                       }
                     }
