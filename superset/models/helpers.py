@@ -1167,15 +1167,22 @@ class ExploreMixin:  # pylint: disable=too-many-public-methods
             :param df: Original DataFrame returned by the engine
             :return: Mutated DataFrame
             """
-            labels_expected = query_str_ext.labels_expected
-            if df is not None and not df.empty:
-                if len(df.columns) < len(labels_expected):
-                    raise QueryObjectValidationError(
-                        _("Db engine did not return all queried columns")
-                    )
-                if len(df.columns) > len(labels_expected):
-                    df = df.iloc[:, 0 : len(labels_expected)]
-                df.columns = labels_expected
+            labels_expected = list(query_str_ext.labels_expected)
+            if df is None:
+                return None
+
+            # Some drivers omit the schema for successful queries with no rows.
+            # Restore the projection so table-like exports retain their headers.
+            if len(df.index) == 0 and len(df.columns) == 0:
+                df = df.reindex(columns=labels_expected)
+
+            if len(df.columns) < len(labels_expected):
+                raise QueryObjectValidationError(
+                    _("Db engine did not return all queried columns")
+                )
+            if len(df.columns) > len(labels_expected):
+                df = df.iloc[:, 0 : len(labels_expected)]
+            df.columns = labels_expected
             return df
 
         try:

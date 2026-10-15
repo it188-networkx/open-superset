@@ -15,6 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from collections.abc import Callable
+from io import BytesIO
+
 import pandas as pd
 import pytest
 from pytest_mock import MockerFixture
@@ -28,6 +31,8 @@ from superset.exceptions import OAuth2RedirectError
 from superset.models.core import Database
 from superset.sql.parse import Table
 from superset.superset_typing import QueryObjectDict
+from superset.utils.core import QueryStatus
+from superset.utils.excel import df_to_excel
 
 
 def test_query_bubbles_errors(mocker: MockerFixture) -> None:
@@ -71,6 +76,99 @@ def test_query_bubbles_errors(mocker: MockerFixture) -> None:
     }
     with pytest.raises(OAuth2RedirectError):
         sqla_table.query(query_obj)
+
+
+@pytest.mark.parametrize(
+    ("dataframe", "expected"),
+    [
+        pytest.param(
+            pd.DataFrame(),
+            pd.DataFrame(columns=["col_a", "col_b"]),
+            id="empty-without-schema",
+        ),
+        pytest.param(
+            pd.DataFrame(columns=["COL_A", "COL_B"]),
+            pd.DataFrame(columns=["col_a", "col_b"]),
+            id="empty-with-aliases",
+        ),
+        pytest.param(
+            pd.DataFrame(columns=["COL_A", "COL_B", "ORDER_BY"]),
+            pd.DataFrame(columns=["col_a", "col_b"]),
+            id="empty-with-ordering-column",
+        ),
+        pytest.param(
+            pd.DataFrame([[1, 2]], columns=["COL_A", "COL_B"]),
+            pd.DataFrame([[1, 2]], columns=["col_a", "col_b"]),
+            id="populated-with-aliases",
+        ),
+        pytest.param(
+            pd.DataFrame([[1, 2, 3]], columns=["COL_A", "COL_B", "ORDER_BY"]),
+            pd.DataFrame([[1, 2]], columns=["col_a", "col_b"]),
+            id="populated-with-ordering-column",
+        ),
+        pytest.param(
+            pd.DataFrame(columns=["COL_A"]),
+            None,
+            id="empty-with-missing-column",
+        ),
+        pytest.param(
+            pd.DataFrame([[1]], columns=["COL_A"]),
+            None,
+            id="populated-with-missing-column",
+        ),
+        pytest.param(
+            pd.DataFrame(index=[0]),
+            None,
+            id="rows-without-columns",
+        ),
+    ],
+)
+def test_query_normalizes_result_columns(
+    mocker: MockerFixture, dataframe: pd.DataFrame, expected: pd.DataFrame | None
+) -> None:
+    """Normalize query columns and preserve headers in empty XLSX exports."""
+    database = mocker.MagicMock()
+    database.db_engine_spec.extract_errors.return_value = []
+    labels_expected = ["col_a", "col_b"]
+    query_str_ext = mocker.MagicMock(
+        sql="SELECT col_a, col_b FROM my_sqla_table",
+        labels_expected=labels_expected,
+        applied_template_filters=[],
+        applied_filter_columns=[],
+        rejected_filter_columns=[],
+    )
+
+    def apply_mutator(
+        *args: object,
+        mutator: Callable[[pd.DataFrame], pd.DataFrame | None],
+        **kwargs: object,
+    ) -> pd.DataFrame | None:
+        """Apply the query's result mutator to the simulated driver output."""
+        return mutator(dataframe.copy())
+
+    database.get_df.side_effect = apply_mutator
+    sqla_table = SqlaTable(
+        table_name="my_sqla_table", columns=[], metrics=[], database=database
+    )
+    mocker.patch.object(
+        sqla_table, "get_query_str_extended", return_value=query_str_ext
+    )
+
+    result = sqla_table.query({})
+
+    assert labels_expected == ["col_a", "col_b"]
+    if expected is None:
+        assert result.status == QueryStatus.FAILED
+        assert result.error_message is not None
+        assert "Db engine did not return all queried columns" in result.error_message
+        return
+
+    assert result.status == QueryStatus.SUCCESS
+    pd.testing.assert_frame_equal(result.df, expected)
+    if expected.empty:
+        exported = pd.read_excel(BytesIO(df_to_excel(result.df, index=False)))
+        assert exported.empty
+        assert list(exported.columns) == labels_expected
 
 
 def test_permissions_without_catalog() -> None:
