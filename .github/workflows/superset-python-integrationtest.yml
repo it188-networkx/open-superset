@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   test-mysql:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-24.04
     env:
       PYTHONPATH: ${{ github.workspace }}
@@ -104,6 +105,7 @@ jobs:
           path: databases-diagnostics.json
           retention-days: 7
   test-postgres:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -166,6 +168,7 @@ jobs:
           verbose: true
 
   test-sqlite:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-24.04
     env:
       PYTHONPATH: ${{ github.workspace }}

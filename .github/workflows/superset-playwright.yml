@@ -26,6 +26,7 @@ jobs:
   # NOTE: Required Playwright tests are in superset-e2e.yml (E2E / playwright-tests)
   # This workflow contains only experimental tests that run in shadow mode
   playwright-tests-experimental:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-22.04
     continue-on-error: true
     permissions:

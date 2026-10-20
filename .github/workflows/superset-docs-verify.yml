@@ -20,7 +20,7 @@ jobs:
   linkinator:
     # See docs here: https://github.com/marketplace/actions/linkinator
     # Only run on pull_request, not workflow_run
-    if: github.event_name == 'pull_request'
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') && (github.event_name == 'pull_request') }}
     name: Link Checking
     runs-on: ubuntu-latest
     steps:
@@ -59,7 +59,7 @@ jobs:
 
   build-on-pr:
     # Build docs when PR changes docs/** (uses committed databases.json)
-    if: github.event_name == 'pull_request'
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') && (github.event_name == 'pull_request') }}
     name: Build (PR trigger)
     runs-on: ubuntu-24.04
     defaults:
@@ -88,9 +88,7 @@ jobs:
   build-after-tests:
     # Build docs after integration tests complete (uses fresh diagnostics)
     # Only runs if integration tests succeeded
-    if: >
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success'
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') && (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     name: Build (after integration tests)
     runs-on: ubuntu-24.04
     defaults:

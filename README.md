@@ -228,3 +228,21 @@ Understanding the Superset Points of View
 
 <!-- telemetry/analytics pixel: -->
 <img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=bc1c90cd-bc04-4e11-8c7b-289fb2839492" />
+
+## Fork PR validation
+
+`PR CI` runs Python unit tests on Python 3.10–3.12, frontend Jest tests in
+eight parallel shards, a production frontend build, and the complete pre-commit
+checks (including lint and type checks). Changes under `superset-frontend/` select
+frontend checks; backend and Python test paths select backend checks. Shared, CI,
+dependency, and unrecognized paths select both. Only known root documentation can
+skip code checks; the required `PR checks` gate still runs and rejects failed,
+cancelled, or unexpectedly skipped jobs.
+
+Pull requests enable native auto-merge and must pass the repository's required
+checks before merging. Upstream-only PR automation is guarded on this fork;
+non-PR publication workflows retain their existing triggers and steps.
+
+Run `python3 -m unittest discover -s .github/scripts -p 'test_*.py'` to validate
+change selection and gate behavior. `act pull_request -W .github/workflows/pr-ci.yml`
+uses `.actrc` to run the planning checks locally; full validation runs on GitHub.

@@ -12,6 +12,7 @@ on:
 
 jobs:
   config:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-24.04
     outputs:
       has-secrets: ${{ steps.check.outputs.has-secrets }}
@@ -26,7 +27,7 @@ jobs:
 
   ephemeral-env-cleanup:
     needs: config
-    if: needs.config.outputs.has-secrets
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') && (needs.config.outputs.has-secrets) }}
     name: Cleanup ephemeral envs
     runs-on: ubuntu-24.04
     permissions:
