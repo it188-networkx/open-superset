@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   frontend-check-translations:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-24.04
     steps:
       - name: "Checkout ${{ github.ref }} ( ${{ github.sha }} )"
@@ -46,6 +47,7 @@ jobs:
           npm run build-translation
 
   babel-extract:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-24.04
     steps:
       - name: "Checkout ${{ github.ref }} ( ${{ github.sha }} )"

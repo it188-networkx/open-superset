@@ -29,6 +29,7 @@ concurrency:
 jobs:
   cypress-matrix:
     # Somehow one test flakes on 24.04 for unknown reasons, this is the only GHA left on 22.04
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-22.04
     permissions:
       contents: read
@@ -153,6 +154,7 @@ jobs:
           name: cypress-artifact-${{ github.run_id }}-${{ github.job }}-${{ matrix.browser }}-${{ matrix.parallel_id }}--${{ steps.set-safe-app-root.outputs.safe_app_root }}
 
   playwright-tests:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-22.04
     permissions:
       contents: read

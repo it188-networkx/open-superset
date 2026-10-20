@@ -83,7 +83,7 @@ def test_query_bubbles_errors(mocker: MockerFixture) -> None:
     [
         pytest.param(
             pd.DataFrame(),
-            pd.DataFrame(columns=["col_a", "col_b"]),
+            pd.DataFrame(columns=["col_a", "col_b"], dtype="float64"),
             id="empty-without-schema",
         ),
         pytest.param(

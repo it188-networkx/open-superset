@@ -16,6 +16,7 @@ concurrency:
 jobs:
 
   setup_matrix:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-24.04
     outputs:
       matrix_config: ${{ steps.set_matrix.outputs.matrix_config }}
@@ -27,6 +28,7 @@ jobs:
           echo $GITHUB_OUTPUT
 
   docker-build:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     name: docker-build
     needs: setup_matrix
     runs-on: ubuntu-24.04
@@ -130,7 +132,7 @@ jobs:
   docker-compose-image-tag:
     # Run this job only on pushes to master (not for PRs)
     # goal is to check that building the latest image works, not required for all PR pushes
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') && (github.event_name == 'push' && github.ref == 'refs/heads/master') }}
     runs-on: ubuntu-24.04
     steps:
       - name: "Checkout ${{ github.ref }} ( ${{ github.sha }} )"

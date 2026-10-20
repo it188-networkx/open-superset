@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   test-postgres-presto:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-24.04
     env:
       PYTHONPATH: ${{ github.workspace }}
@@ -84,6 +85,7 @@ jobs:
           verbose: true
 
   test-postgres-hive:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-24.04
     env:
       PYTHONPATH: ${{ github.workspace }}

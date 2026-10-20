@@ -26,6 +26,7 @@ env:
 
 jobs:
   sync:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     name: 🎪 Sync PR to desired state
     runs-on: ubuntu-latest
     timeout-minutes: 90

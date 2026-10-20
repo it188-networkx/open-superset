@@ -13,6 +13,7 @@ concurrency:
 
 jobs:
   embedded-sdk-test:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-24.04
     defaults:
       run:

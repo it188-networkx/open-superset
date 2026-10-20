@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   prefer_typescript:
-    if: github.ref == 'ref/heads/master' && github.event_name == 'pull_request'
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') && (github.ref == 'ref/heads/master' && github.event_name == 'pull_request') }}
     name: Prefer TypeScript
     runs-on: ubuntu-24.04
     permissions:

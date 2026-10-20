@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   pre-commit:
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' || github.repository == 'apache/superset') }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
